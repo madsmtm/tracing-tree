@@ -22,6 +22,7 @@ use tracing_subscriber::{
 };
 
 pub(crate) struct Data {
+    #[allow(unused)]
     start: Instant,
     kvs: Vec<(&'static str, String)>,
 }
@@ -311,33 +312,6 @@ where
             .event_scope(event)
             .map(|scope| scope.count())
             .unwrap_or(0);
-
-        // check if this event occurred in the context of a span.
-        // if it has, get the start time of this span.
-        let start = match ctx.current_span().id() {
-            Some(id) => match ctx.span(id) {
-                // if the event is in a span, get the span's starting point.
-                Some(ctx) => {
-                    let ext = ctx.extensions();
-                    let data = ext
-                        .get::<Data>()
-                        .expect("Data cannot be found in extensions");
-                    Some(data.start)
-                }
-                None => None,
-            },
-            None => None,
-        };
-        if let Some(start) = start {
-            let elapsed = start.elapsed();
-            write!(
-                &mut event_buf,
-                "{timestamp}{unit} ",
-                timestamp = self.styled(Style::new().dimmed(), elapsed.as_millis().to_string()),
-                unit = self.styled(Style::new().dimmed(), "ms"),
-            )
-            .expect("Unable to write to buffer");
-        }
 
         #[cfg(feature = "tracing-log")]
         let normalized_meta = event.normalized_metadata();
