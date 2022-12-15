@@ -18,7 +18,7 @@ use tracing_log::NormalizeEvent;
 use tracing_subscriber::{
     fmt::MakeWriter,
     layer::{Context, Layer},
-    registry::{self, LookupSpan},
+    registry::LookupSpan,
 };
 
 pub(crate) struct Data {
@@ -220,14 +220,7 @@ where
         let bufs = &mut *guard;
         let mut current_buf = &mut bufs.current_buf;
 
-        let indent = ctx
-            .lookup_current()
-            .as_ref()
-            .map(registry::SpanRef::scope)
-            .map(registry::Scope::from_root)
-            .into_iter()
-            .flatten()
-            .count();
+        let indent = span.scope().count();
 
         if self.config.verbose_entry || matches!(style, SpanMode::Open { .. } | SpanMode::Event) {
             if self.config.targets {
@@ -274,6 +267,8 @@ where
     }
 }
 
+struct HasBeenPrinted;
+
 impl<S, W> Layer<S> for HierarchicalLayer<W>
 where
     S: Subscriber + for<'span> LookupSpan<'span>,
@@ -291,17 +286,22 @@ where
                 self.write_span_info(&span.id(), &ctx, SpanMode::PreOpen);
             }
         }
-
-        self.write_span_info(
-            id,
-            &ctx,
-            SpanMode::Open {
-                verbose: self.config.verbose_entry,
-            },
-        );
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<S>) {
+        for span in ctx.event_scope(event).expect("event_scope").from_root() {
+            if span.extensions().get::<HasBeenPrinted>().is_none() {
+                span.extensions_mut().insert(HasBeenPrinted);
+                self.write_span_info(
+                    &span.id(),
+                    &ctx,
+                    SpanMode::Open {
+                        verbose: self.config.verbose_entry,
+                    },
+                );
+            }
+        }
+
         let mut guard = self.bufs.lock().unwrap();
         let bufs = &mut *guard;
         let mut event_buf = &mut bufs.current_buf;
@@ -374,13 +374,18 @@ where
     }
 
     fn on_close(&self, id: Id, ctx: Context<S>) {
-        self.write_span_info(
-            &id,
-            &ctx,
-            SpanMode::Close {
-                verbose: self.config.verbose_exit,
-            },
-        );
+        let span = ctx.span(&id).expect("span");
+        if span.extensions().get::<HasBeenPrinted>().is_some() {
+            span.extensions_mut().remove::<HasBeenPrinted>();
+
+            self.write_span_info(
+                &id,
+                &ctx,
+                SpanMode::Close {
+                    verbose: self.config.verbose_exit,
+                },
+            );
+        }
 
         if self.config.verbose_exit {
             if let Some(span) = ctx.span(&id).and_then(|span| span.parent()) {
