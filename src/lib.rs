@@ -11,7 +11,7 @@ use std::{
 use tracing_core::{
     field::{Field, Visit},
     span::{Attributes, Id},
-    Event, Subscriber,
+    Event, Subscriber, Level,
 };
 #[cfg(feature = "tracing-log")]
 use tracing_log::NormalizeEvent;
@@ -286,6 +286,17 @@ where
             if let Some(span) = span.parent() {
                 self.write_span_info(&span.id(), &ctx, SpanMode::PreOpen);
             }
+        }
+
+        if span.metadata().level() <= &Level::INFO {
+            span.extensions_mut().insert(HasBeenPrinted);
+            self.write_span_info(
+                &span.id(),
+                &ctx,
+                SpanMode::Open {
+                    verbose: self.config.verbose_entry,
+                },
+            );
         }
     }
 
